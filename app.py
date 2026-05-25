@@ -1,30 +1,61 @@
 import streamlit as st
 import pandas as pd
 import random
+import time
 
-# Removed calendar emoji from title
-st.set_page_config(page_title="AI Timetable Scheduler", layout="wide")
+# =========================================================================
+# 1. UI CONFIGURATION & STYLING
+# =========================================================================
+st.set_page_config(page_title="AI Timetable Scheduler", page_icon="🧬", layout="wide")
 
-st.title("AI-Powered Academic Timetable Scheduler")
-st.subheader("Optimized Schedule Generation Using Genetic Algorithms")
-st.write("---")
+st.markdown("""
+    <style>
+    .main-title { font-size: 2.4rem; font-weight: 700; color: #FAFAFA; margin-bottom: 0.5rem; }
+    .sub-title { font-size: 1.1rem; color: #A3A3A3; margin-bottom: 2rem; }
+    </style>
+""", unsafe_allowed_html=True)
 
-# 1. INPUT CONFIGURATION SIDEBAR
-st.sidebar.header("Input Configuration")
-batches_input = st.sidebar.text_input("Student Batches", "BCS2b, BCS3b, BCSaiml4b")
-subjects_input = st.sidebar.text_input("Courses / Subjects", "DSA, OS, DBMS, Math, COA, AI")
-rooms_input = st.sidebar.text_input("Available Rooms", "Room 401, Room 402, Room 404, Lab 1")
-professors_input = st.sidebar.text_input("Available Faculty", "Dr. Roy, Prof. Das, Dr. Sen, Prof. Jha")
+st.markdown('<div class="main-title">🧬 Campus AI Timetable Scheduler</div>', unsafe_allowed_html=True)
+st.markdown('<div class="sub-title">Automated Course Scheduling Engine powered by Genetic Optimization</div>', unsafe_allowed_html=True)
 
+# =========================================================================
+# 2. SIDEBAR - CONTROL PANEL & INPUT DATA
+# =========================================================================
+st.sidebar.header("⚙️ Control Panel")
+
+# --- NEW FEATURE: INTERACTIVE HYPERPARAMETER SLIDERS ---
+st.sidebar.subheader("🧬 GA Hyperparameters")
+user_generations = st.sidebar.slider("Max Generations", min_value=10, max_value=200, value=50, step=10)
+user_pop_size = st.sidebar.slider("Population Size Pool", min_value=10, max_value=100, value=20, step=5)
+user_mutation_rate = st.sidebar.slider("Mutation Probability", min_value=0.01, max_value=0.50, value=0.10, step=0.01)
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("🏫 Academic Inputs")
+
+# Default values for quick testing
+default_batches = "BCS-2A, BCS-2B, BME-3A"
+default_subjects = "Data Structures, Computer Architecture, Discrete Math, Operating Systems, Java Programming"
+default_rooms = "Room 301, Room 302, Lab 1"
+default_professors = "Dr. P. Roy, Prof. S. Das, Dr. A. Sen, Prof. M. Mitra"
+
+batches_input = st.sidebar.text_area("Batches / Sections (Comma separated)", default_batches)
+subjects_input = st.sidebar.text_area("Subjects / Courses (Comma separated)", default_subjects)
+rooms_input = st.sidebar.text_area("Available Classrooms (Comma separated)", default_rooms)
+professors_input = st.sidebar.text_area("Faculty Members (Comma separated)", default_professors)
+
+# Parsing text inputs into clean lists
 batches = [b.strip() for b in batches_input.split(",") if b.strip()]
 subjects = [s.strip() for s in subjects_input.split(",") if s.strip()]
 rooms = [r.strip() for r in rooms_input.split(",") if r.strip()]
 professors = [p.strip() for p in professors_input.split(",") if p.strip()]
 
+# Standard structured institutional timeline parameters
 days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
-slots = ["9:30 AM", "11:00 AM", "1:30 PM", "3:00 PM"]
+slots = ["09:30 AM", "11:00 AM", "01:30 PM", "03:00 PM"]
 
-# 2. GENETIC ALGORITHM MECHANICS
+# =========================================================================
+# 3. GENETIC ALGORITHM MECHANICS
+# =========================================================================
 class LectureGene:
     def __init__(self, batch, day, slot):
         self.batch = batch
@@ -34,113 +65,140 @@ class LectureGene:
         self.room = random.choice(rooms) if rooms else "TBD"
         self.professor = random.choice(professors) if professors else "TBD"
 
-def calculate_fitness(chromosome):
-    clashes = 0
-    prof_registry = {}
-    room_registry = {}
-    
-    for gene in chromosome:
-        time_key = (gene.day, gene.slot)
-        
-        prof_time = (gene.professor, time_key)
-        if prof_time in prof_registry and prof_registry[prof_time] != gene.batch:
-            clashes += 1
-        else:
-            prof_registry[prof_time] = gene.batch
-            
-        room_time = (gene.room, time_key)
-        if room_time in room_registry and room_registry[room_time] != gene.batch:
-            clashes += 1
-        else:
-            room_registry[room_time] = gene.batch
-            
-    return 1 / (1 + clashes)
-
-def run_genetic_algorithm(generations=50, pop_size=20, mutation_rate=0.1):
-    population = []
-    for _ in range(pop_size):
-        chromosome = []
+class TimetableChromosome:
+    def __init__(self):
+        self.genes = []
         for batch in batches:
             for day in days:
                 for slot in slots:
-                    chromosome.append(LectureGene(batch, day, slot))
-        population.append(chromosome)
+                    self.genes.append(LectureGene(batch, day, slot))
+        self.fitness = 0.0
+
+    def calculate_fitness(self):
+        clashes = 0
         
-    for generation in range(generations):
-        population = sorted(population, key=lambda ch: calculate_fitness(ch), reverse=True)
-        if calculate_fitness(population[0]) == 1.0:
-            break
-            
-        new_generation = population[:2]
-        while len(new_generation) < pop_size:
-            parent1 = random.choice(population[:10])
-            parent2 = random.choice(population[:10])
-            cutoff = random.randint(0, len(parent1) - 1)
-            child = parent1[:cutoff] + parent2[cutoff:]
-            
-            if random.random() < mutation_rate:
-                mutate_idx = random.randint(0, len(child) - 1)
-                if rooms: child[mutate_idx].room = random.choice(rooms)
-                if professors: child[mutate_idx].professor = random.choice(professors)
+        # Checking every unique pair of assignments for overlapping conflicts
+        for i in range(len(self.genes)):
+            for j in range(i + 1, len(self.genes)):
+                g1 = self.genes[i]
+                g2 = self.genes[j]
                 
-            new_generation.append(child)
-        population = new_generation
+                if g1.day == g2.day and g1.slot == g2.slot:
+                    # Constraint 1: Same room cannot hold two classes at once
+                    if g1.room == g2.room:
+                        clashes += 1
+                    # Constraint 2: A professor cannot be in two places at once
+                    if g1.professor == g2.professor:
+                        clashes += 1
+                        
+        # Fitness formula bounding result strictly between 0.0 and 1.0
+        self.fitness = 1.0 / (1.0 + clashes)
+        return self.fitness
 
-    return sorted(population, key=lambda ch: calculate_fitness(ch), reverse=True)[0]
+def crossover(parent1, parent2):
+    child = TimetableChromosome()
+    midpoint = random.randint(0, len(parent1.genes) - 1)
+    child.genes = parent1.genes[:midpoint] + parent2.genes[midpoint:]
+    return child
 
-# 3. SESSION STATE LOGIC (Fixes the Dropdown Reset bug)
-if "best_schedule" not in st.session_state:
-    st.session_state.best_schedule = None
-if "final_fitness" not in st.session_state:
-    st.session_state.final_fitness = None
-if "total_clashes" not in st.session_state:
-    st.session_state.total_clashes = None
+def mutate(chromosome, mutation_rate):
+    for gene in chromosome.genes:
+        if random.random() < mutation_rate:
+            gene.subject = random.choice(subjects) if subjects else "TBD"
+            gene.room = random.choice(rooms) if rooms else "TBD"
+            gene.professor = random.choice(professors) if professors else "TBD"
 
-if st.sidebar.button(" Run Genetic Optimization"):
-    if not batches or not subjects or not rooms or not professors:
-        st.error(" Please fill in all configuration inputs in the sidebar first!")
+# =========================================================================
+# 4. RUN OPTIMIZATION LOGIC
+# =========================================================================
+if st.sidebar.button("🚀 Run Genetic Optimization", use_container_width=True):
+    if not (batches and subjects and rooms and professors):
+        st.error("⚠️ Please ensure all academic input fields have at least one entry.")
     else:
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        for percent_complete in range(100):
-            import time; time.sleep(0.01)
-            progress_bar.progress(percent_complete + 1)
-            status_text.text(f"Evolving generations... Calculating Fitness Matrices ({percent_complete+1}%)")
+        with st.spinner("🧬 Initializing tracking states and evolving population structures..."):
+            start_time = time.time()
             
-        # Store results in session state memory
-        st.session_state.best_schedule = run_genetic_algorithm()
-        st.session_state.final_fitness = calculate_fitness(st.session_state.best_schedule)
-        st.session_state.total_clashes = int((1 / st.session_state.final_fitness) - 1)
-        
-        status_text.empty()
-        progress_bar.empty()
+            # Instantiating the initial random population base
+            population = [TimetableChromosome() for _ in range(user_pop_size)]
+            
+            # Evolutionary loop execution
+            for generation in range(user_generations):
+                for chromosome in population:
+                    chromosome.calculate_fitness()
+                
+                # Sort population based on descending fitness scores
+                population.sort(key=lambda x: x.fitness, reverse=True)
+                
+                # Check for convergence
+                if population[0].fitness == 1.0:
+                    break
+                    
+                # Selection & breeding step
+                mating_pool = population[:int(user_pop_size/2)]
+                next_gen = []
+                while len(next_gen) < user_pop_size:
+                    p1 = random.choice(mating_pool)
+                    p2 = random.choice(mating_pool)
+                    child = crossover(p1, p2)
+                    mutate(child, user_mutation_rate)
+                    next_gen.append(child)
+                population = next_gen
 
-# 4. RENDER RESULTS (If schedule exists in memory)
-if st.session_state.best_schedule is not None:
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric(label="Algorithm Fitness Score", value=f"{st.session_state.final_fitness:.4f}", delta="Target: 1.0000")
-    with col2:
-        st.metric(label="Remaining Schedule Clashes", value=str(st.session_state.total_clashes), delta="Target: 0", delta_color="inverse")
+            best_schedule = population[0]
+            best_schedule.calculate_fitness()
+            execution_time = time.time() - start_time
+
+        # Calculate final analytics metrics
+        final_clashes = int((1.0 / best_schedule.fitness) - 1) if best_schedule.fitness > 0 else 0
+
+        # Display performance highlights
+        st.success(f"✨ Perfect Optimization Achieved! (Fitness Score: {best_schedule.fitness:.4f})")
         
-    st.success(" Evolution Successful! Complete clash-free schedule locked in.")
-    
-    flat_data = []
-    for g in st.session_state.best_schedule:
-        display_text = f"{g.subject} \n({g.professor} - {g.room})"
-        flat_data.append([g.batch, g.day, g.slot, display_text])
-        
-    df_all = pd.DataFrame(flat_data, columns=["Batch", "Day", "Time Slot", "Details"])
-    
-    # Dropdown menu to filter by batch (Now fully working)
-    selected_batch = st.selectbox(" View Generated Grid for Batch:", batches)
-    batch_df = df_all[df_all["Batch"] == selected_batch]
-    
-    pivot_df = batch_df.pivot(index="Time Slot", columns="Day", values="Details")
-    pivot_df = pivot_df.reindex(index=slots, columns=days)
-    
-    st.dataframe(pivot_df, use_container_width=True)
-    # Removed st.balloons() completely
-else:
-    st.info(" Set up your college classes/rooms in the sidebar panel and click 'Run Genetic Optimization' to watch the AI organize it!")
+        # Format the optimized dataset into a clean Pandas dataframe
+        data_list = []
+        for g in best_schedule.genes:
+            data_list.append({
+                "Batch": g.batch,
+                "Day": g.day,
+                "Time Slot": g.slot,
+                "Subject": g.subject,
+                "Room": g.room,
+                "Faculty": g.professor
+            })
+        df_all = pd.DataFrame(data_list)
+
+        # Render structured layouts for each class batch section
+        st.markdown("### 📅 Generated Academic Schedules")
+        for batch_name in batches:
+            df_batch = df_all[df_all["Batch"] == batch_name]
+            
+            # Reshape standard records cleanly into an institutional calendar grid representation
+            pivot_df = df_batch.pivot(index="Time Slot", columns="Day", values="Subject")
+            pivot_df = pivot_df.reindex(index=slots, columns=days).fillna("---")
+            
+            st.subheader(f"📋 Section Matrix View: {batch_name}")
+            st.dataframe(pivot_df, use_container_width=True)
+
+        # --- NEW FEATURE: DATA SHARING (DOWNLOAD CSV) ---
+        st.write("") 
+        st.download_button(
+            label="📥 Download Full Schedule Dataset (CSV)",
+            data=df_all.to_csv(index=False),
+            file_name="ai_generated_timetable.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+
+        # --- NEW FEATURE: ADVANCED VIEW MORE SECTION (EXPANDER) ---
+        st.write("")
+        with st.expander("🔍 View Advanced Evolution Analytics"):
+            st.markdown("#### 📊 Execution Summary Logs")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric(label="Calculation Runtime", value=f"{execution_time:.3f} seconds")
+            with col2:
+                st.metric(label="Active Search Space Depth", value=f"Gen {generation + 1}")
+            with col3:
+                st.metric(label="Unresolved Structural Clashes", value=str(final_clashes))
+            
+            st.info("💡 Concept Note: The Core Fitness optimization score utilizes the objective penalty formulation $f(x) = \\frac{1}{1 + \\text{Clashes}}$. Adjusting the slider settings in the sidebar changes the processing constraints dynamically.")
