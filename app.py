@@ -8,11 +8,10 @@ import time
 # =========================================================================
 st.set_page_config(page_title="AI Timetable Scheduler", page_icon="🧬", layout="wide")
 
-# Fixed line: Kept clean and single-line to avoid Streamlit string metric errors
-st.markdown("<style>.main-title { font-size: 2.4rem; font-weight: 700; color: #FAFAFA; margin-bottom: 0.5rem; } .sub-title { font-size: 1.1rem; color: #A3A3A3; margin-bottom: 2rem; }</style>", unsafe_allowed_html=True)
-
-st.markdown('<div class="main-title">🧬 Campus AI Timetable Scheduler</div>', unsafe_allowed_html=True)
-st.markdown('<div class="sub-title">Automated Course Scheduling Engine powered by Genetic Optimization</div>', unsafe_allowed_html=True)
+# Using native Streamlit components to bypass the Python 3.14 / metrics_util bug completely
+st.title("🧬 Campus AI Timetable Scheduler")
+st.caption("Automated Course Scheduling Engine powered by Genetic Optimization")
+st.write("") # Clean spacing line
 
 # =========================================================================
 # 2. SIDEBAR - CONTROL PANEL & INPUT DATA
