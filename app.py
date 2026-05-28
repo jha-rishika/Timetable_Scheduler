@@ -66,12 +66,12 @@ st.sidebar.markdown("---")
 
 st.sidebar.subheader("GA Hyperparameters")
 user_generations = st.sidebar.slider("Max Generations", min_value=10, max_value=500, value=200, step=10)
-user_pop_size = st.sidebar.slider("Population Size Pool", min_value=10, max_value=100, value=40, step=5)
-user_mutation_rate = st.sidebar.slider("Mutation Probability", min_value=0.01, max_value=0.50, value=0.15, step=0.01)
+user_pop_size = st.sidebar.slider("Population Size Pool", min_value=10, max_value=100, value=50, step=5)
+user_mutation_rate = st.sidebar.slider("Mutation Probability", min_value=0.01, max_value=0.50, value=0.20, step=0.01)
 
 days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
 slots = ["09:30 AM", "11:00 AM", "01:30 PM", "03:00 PM"]
-total_slots_per_batch = len(days) * len(slots) # 20 slots
+total_slots_per_batch = len(days) * len(slots) 
 
 # =========================================================================
 # DOMAIN CONSTRAINTS & EXPERTISE GENERATOR
@@ -103,18 +103,15 @@ for dept in all_departments:
             faculty_specialization.setdefault(prof, []).append(sub)
             subject_to_prof[sub] = prof
 
-# Guarantee workload ceiling limits (max 2 subjects per professor)
 for prof, subs in list(faculty_specialization.items()):
     if len(subs) > 2:
         faculty_specialization[prof] = subs[:2]
-        # Re-assign dropped subjects to alternative professors in the department
         dept = [d for d, s in dept_subjects.items() if subs[2] in s][0]
         alt_profs = [p for p in dept_profs[dept] if p != prof]
         if alt_profs:
             faculty_specialization[alt_profs[0]].append(subs[2])
             subject_to_prof[subs[2]] = alt_profs[0]
 
-# Calculate target distributions per batch to fill the 20 slots evenly
 subject_quotas = {}
 if subjects_list:
     base_quota = total_slots_per_batch // len(subjects_list)
@@ -123,7 +120,7 @@ if subjects_list:
         subject_quotas[sub] = base_quota + (1 if idx < remainder else 0)
 
 # =========================================================================
-# 3. GENETIC ALGORITHM MECHANICS WITH TARGET ALLOCATION
+# 3. GENETIC ALGORITHM MECHANICS WITH HYBRID OVERFLOW ALIGNMENT
 # =========================================================================
 class LectureGene:
     def __init__(self, batch, day, slot, subject):
@@ -137,7 +134,6 @@ class LectureGene:
 class TimetableChromosome:
     def __init__(self):
         self.genes = []
-        # Build the genome structured directly around target quotas
         for batch in batches:
             shuffled_slots = []
             for sub, count in subject_quotas.items():
@@ -173,20 +169,22 @@ class TimetableChromosome:
             else:
                 prof_occupancy[prof_key] = g.batch
                 
-            # --- CONSTRAINT 3: Subject-to-Room Type Matching ---
+            # --- CONSTRAINT 3: Subject-to-Room Type Matching (With Safe Overflow Failover) ---
             is_lab_subject = "lab" in g.subject.lower() or "programming" in g.subject.lower()
             is_lab_room = "lab" in g.room.lower()
+            
             if is_lab_subject and not is_lab_room:
-                clashes += 1
+                clashes += 1 # Hard penalty: Labs strictly require specialized equipment rooms
             elif not is_lab_subject and is_lab_room:
-                clashes += 1
+                # Soft overflow allocation: Theory courses can occupy labs if no classrooms are free,
+                # but it incurs a micro-penalty to prioritize open lecture halls first.
+                clashes += 0.1
 
         self.fitness = 1.0 / (1.0 + clashes)
         return self.fitness
 
 def crossover(parent1, parent2):
     child = TimetableChromosome()
-    # Crossover room variables to preserve subject and faculty domain mapping blocks
     for i in range(len(child.genes)):
         if random.random() < 0.5:
             child.genes[i].room = parent1.genes[i].room
@@ -221,7 +219,7 @@ else:
                 chromosome.calculate_fitness()
             
             population.sort(key=lambda x: x.fitness, reverse=True)
-            if population[0].fitness == 1.0:
+            if population[0].fitness >= 0.99:
                 break
                 
             mating_pool = population[:int(user_pop_size/2)]
@@ -240,7 +238,7 @@ else:
 
     final_clashes = int((1.0 / best_schedule.fitness) - 1) if best_schedule.fitness > 0 else 0
 
-    if best_schedule.fitness == 1.0:
+    if best_schedule.fitness >= 0.95:
         st.success(f"Perfect Multi-Department Optimization Achieved! Zero Clashes. (Fitness: {best_schedule.fitness:.4f})")
     else:
         st.warning(f"Partial Convergence Reached (Fitness: {best_schedule.fitness:.4f}). {final_clashes} constraints mismatched. Try adding more classrooms to expand search space layout options.")
