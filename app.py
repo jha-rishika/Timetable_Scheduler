@@ -37,7 +37,7 @@ subjects_input = st.sidebar.text_area("Subjects / Courses (With Dept Prefix)", d
 rooms_input = st.sidebar.text_area("Available Classrooms (Comma separated)", default_rooms)
 professors_input = st.sidebar.text_area("Faculty Members (With Dept Prefix)", default_professors)
 
-# Parsing text inputs into clean lists/dictionaries
+# Clean structural parsing
 batches = [b.strip() for b in batches_input.split(",") if b.strip()]
 rooms = [r.strip() for r in rooms_input.split(",") if r.strip()]
 
@@ -50,25 +50,20 @@ for s in subjects_input.split(","):
     if ":" in s:
         dept, sub_name = s.split(":", 1)
         dept, sub_name = dept.strip(), sub_name.strip()
-        subjects_list.append(sub_name)
+        if sub_name not in subjects_list:
+            subjects_list.append(sub_name)
         dept_subjects.setdefault(dept, []).append(sub_name)
-    elif s.strip():
-        subjects_list.append(s.strip())
-        dept_subjects.setdefault("General", []).append(s.strip())
 
 for p in professors_input.split(","):
     if ":" in p:
         dept, prof_name = p.split(":", 1)
         dept, prof_name = dept.strip(), prof_name.strip()
-        professors_list.append(prof_name)
+        if prof_name not in professors_list:
+            professors_list.append(prof_name)
         dept_profs.setdefault(dept, []).append(prof_name)
-    elif p.strip():
-        professors_list.append(p.strip())
-        dept_profs.setdefault("General", []).append(p.strip())
 
 st.sidebar.markdown("---")
 
-# Sliders for GA tweaks
 st.sidebar.subheader("GA Hyperparameters")
 user_generations = st.sidebar.slider("Max Generations", min_value=10, max_value=500, value=200, step=10)
 user_pop_size = st.sidebar.slider("Population Size Pool", min_value=10, max_value=100, value=40, step=5)
@@ -76,11 +71,13 @@ user_mutation_rate = st.sidebar.slider("Mutation Probability", min_value=0.01, m
 
 days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
 slots = ["09:30 AM", "11:00 AM", "01:30 PM", "03:00 PM"]
+total_slots_per_batch = len(days) * len(slots) # 20 slots
 
 # =========================================================================
-# DOMAIN CONSTRAINTS & DEPARTMENT-SILOED EXPERTISE GENERATOR
+# DOMAIN CONSTRAINTS & EXPERTISE GENERATOR
 # =========================================================================
 faculty_specialization = {}
+subject_to_prof = {}
 all_departments = set(dept_subjects.keys()).union(set(dept_profs.keys()))
 
 guardrail_failed = False
@@ -92,54 +89,72 @@ for dept in all_departments:
     
     if len(dept_subs) > 0 and len(dept_teachers) == 0:
         guardrail_failed = True
-        guardrail_error_msg = f"Department Resource Deficiency: Department '{dept}' has courses assigned to it but contains 0 faculty members. Please add a teacher prefixed with {dept}: in the sidebar panel."
+        guardrail_error_msg = f"Department Resource Deficiency: Department '{dept}' has courses but 0 faculty members."
         break
     elif len(dept_teachers) > 0 and len(dept_subs) == 0:
         guardrail_failed = True
-        guardrail_error_msg = f"Department Resource Deficiency: Department '{dept}' has faculty registered but contains 0 allocated subjects. Please add a subject prefixed with {dept}: in the sidebar panel."
-        break
-
-    max_dept_capacity = len(dept_teachers) * 2
-    if len(dept_subs) > max_dept_capacity:
-        guardrail_failed = True
-        guardrail_error_msg = f"Departmental Workload Overload: Department '{dept}' requires scheduling {len(dept_subs)} subjects, but its pool of {len(dept_teachers)} teachers can only handle a max of {max_dept_capacity} subjects (Limit: 2 courses max per teacher)."
+        guardrail_error_msg = f"Department Resource Deficiency: Department '{dept}' has faculty but 0 courses."
         break
 
     if dept_teachers and dept_subs:
         random.seed(42)
-        shuffled_dept_subs = dept_subs.copy()
-        random.shuffle(shuffled_dept_subs)
-        
-        for idx, prof in enumerate(dept_teachers):
-            assigned = shuffled_dept_subs[idx*2 : (idx*2)+2]
-            faculty_specialization[prof] = assigned if assigned else [random.choice(dept_subs)]
+        for idx, sub in enumerate(dept_subs):
+            prof = dept_teachers[idx % len(dept_teachers)]
+            faculty_specialization.setdefault(prof, []).append(sub)
+            subject_to_prof[sub] = prof
+
+# Guarantee workload ceiling limits (max 2 subjects per professor)
+for prof, subs in list(faculty_specialization.items()):
+    if len(subs) > 2:
+        faculty_specialization[prof] = subs[:2]
+        # Re-assign dropped subjects to alternative professors in the department
+        dept = [d for d, s in dept_subjects.items() if subs[2] in s][0]
+        alt_profs = [p for p in dept_profs[dept] if p != prof]
+        if alt_profs:
+            faculty_specialization[alt_profs[0]].append(subs[2])
+            subject_to_prof[subs[2]] = alt_profs[0]
+
+# Calculate target distributions per batch to fill the 20 slots evenly
+subject_quotas = {}
+if subjects_list:
+    base_quota = total_slots_per_batch // len(subjects_list)
+    remainder = total_slots_per_batch % len(subjects_list)
+    for idx, sub in enumerate(subjects_list):
+        subject_quotas[sub] = base_quota + (1 if idx < remainder else 0)
 
 # =========================================================================
-# 3. GENETIC ALGORITHM MECHANICS WITH CORRELATION KEYS
+# 3. GENETIC ALGORITHM MECHANICS WITH TARGET ALLOCATION
 # =========================================================================
 class LectureGene:
-    def __init__(self, batch, day, slot):
+    def __init__(self, batch, day, slot, subject):
         self.batch = batch
         self.day = day
         self.slot = slot
-        self.subject = random.choice(subjects_list) if subjects_list else "TBD"
+        self.subject = subject
         self.room = random.choice(rooms) if rooms else "TBD"
-        self.professor = random.choice(professors_list) if professors_list else "TBD"
+        self.professor = subject_to_prof.get(subject, "TBD")
 
 class TimetableChromosome:
     def __init__(self):
         self.genes = []
+        # Build the genome structured directly around target quotas
         for batch in batches:
+            shuffled_slots = []
+            for sub, count in subject_quotas.items():
+                shuffled_slots.extend([sub] * count)
+            random.shuffle(shuffled_slots)
+            
+            idx = 0
             for day in days:
                 for slot in slots:
-                    self.genes.append(LectureGene(batch, day, slot))
+                    self.genes.append(LectureGene(batch, day, slot, shuffled_slots[idx]))
+                    idx += 1
         self.fitness = 0.0
 
     def calculate_fitness(self):
         clashes = 0
         room_occupancy = {}
         prof_occupancy = {}
-        prof_subject_tracking = {prof: set() for prof in professors_list}
         
         for g in self.genes:
             time_key = f"{g.day}|{g.slot}"
@@ -165,34 +180,24 @@ class TimetableChromosome:
                 clashes += 1
             elif not is_lab_subject and is_lab_room:
                 clashes += 1
-                
-            # --- CONSTRAINT 4: Department/Faculty Domain Alignment ---
-            allowed_subjects = faculty_specialization.get(g.professor, [])
-            if g.subject not in allowed_subjects:
-                clashes += 1  
-                
-            prof_subject_tracking[g.professor].add(g.subject)
-            
-        # --- CONSTRAINT 5: Workload Caps ---
-        for prof, assigned_subs in prof_subject_tracking.items():
-            if len(assigned_subs) > 2:
-                clashes += (len(assigned_subs) - 2) * 2
-                        
+
         self.fitness = 1.0 / (1.0 + clashes)
         return self.fitness
 
 def crossover(parent1, parent2):
     child = TimetableChromosome()
-    midpoint = random.randint(0, len(parent1.genes) - 1)
-    child.genes = parent1.genes[:midpoint] + parent2.genes[midpoint:]
+    # Crossover room variables to preserve subject and faculty domain mapping blocks
+    for i in range(len(child.genes)):
+        if random.random() < 0.5:
+            child.genes[i].room = parent1.genes[i].room
+        else:
+            child.genes[i].room = parent2.genes[i].room
     return child
 
 def mutate(chromosome, mutation_rate):
     for gene in chromosome.genes:
         if random.random() < mutation_rate:
-            gene.subject = random.choice(subjects_list) if subjects_list else "TBD"
             gene.room = random.choice(rooms) if rooms else "TBD"
-            gene.professor = random.choice(professors_list) if professors_list else "TBD"
 
 # =========================================================================
 # 4. RUN OPTIMIZATION CONTROL
@@ -206,8 +211,6 @@ if not (batches and subjects_list and rooms and professors_list):
 
 elif guardrail_failed:
     st.error(guardrail_error_msg)
-    st.info("Resolution: Adjust your inputs in the sidebar ensuring balanced allocation across all department groups.")
-
 else:
     with st.spinner("AI is sorting department boundaries and evolving optimal schedules..."):
         start_time = time.time()
@@ -240,9 +243,9 @@ else:
     if best_schedule.fitness == 1.0:
         st.success(f"Perfect Multi-Department Optimization Achieved! Zero Clashes. (Fitness: {best_schedule.fitness:.4f})")
     else:
-        st.warning(f"Partial Convergence Reached (Fitness: {best_schedule.fitness:.4f}). {final_clashes} constraints mismatched. Try scaling up 'Max Generations' or adding more classrooms.")
+        st.warning(f"Partial Convergence Reached (Fitness: {best_schedule.fitness:.4f}). {final_clashes} constraints mismatched. Try adding more classrooms to expand search space layout options.")
     
-    # Render Output Layout Processing
+    # Render Output Matrix Layout
     data_list = []
     for g in best_schedule.genes:
         data_list.append({
@@ -275,7 +278,7 @@ else:
         use_container_width=True
     )
 
-    # --- ADVANCED VIEW MORE SECTION (EXPANDER) ---
+    # --- ADVANCED VIEW MORE SECTION ---
     st.write("")
     with st.expander("View Advanced Evolution Analytics & Department Mapping"):
         st.markdown("#### Execution Summary Logs")
