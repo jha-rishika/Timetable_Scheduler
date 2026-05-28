@@ -6,19 +6,19 @@ import time
 # =========================================================================
 # 1. UI CONFIGURATION & STYLING
 # =========================================================================
-st.set_page_config(page_title="AI Timetable Scheduler", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="AI Timetable Scheduler", page_icon=" ", layout="wide")
 
-st.title("🧬 Campus AI Timetable Scheduler")
+st.title(" Campus AI Timetable Scheduler")
 st.caption("Department-Aware Automated Course Scheduling Engine powered by Constrained Genetic Optimization")
 st.write("") 
 
 # =========================================================================
 # 2. SIDEBAR - CONFIGURATION PANEL & DEPARTMENT INPUT DATA
 # =========================================================================
-st.sidebar.header("⚙️ Configuration Panel")
+st.sidebar.header(" Configuration Panel")
 
-st.sidebar.subheader("🏫 Academic Inputs (Department-Siloed)")
-st.sidebar.info("💡 **Format Tip:** Prefix subjects and professors with their Department code followed by a colon (e.g., `CSE: Subject` or `BasicSci: Name`).")
+st.sidebar.subheader(" Academic Inputs (Department-Siloed)")
+st.sidebar.info(" Tip: Prefix subjects and professors with their Department code followed by a colon (e.g., `CSE: Subject` or `BasicSci: Name`).")
 
 default_batches = "BCS-2A, BCS-2B, BME-3A"
 default_subjects = "CSE: Data Structures, CSE: Java Lab, ECE: Computer Architecture, BasicSci: Discrete Math, CSE: Operating Systems"
@@ -64,7 +64,7 @@ for p in professors_input.split(","):
 st.sidebar.markdown("---")
 
 # Sliders for GA tweaks
-st.sidebar.subheader("🧬 GA Hyperparameters")
+st.sidebar.subheader(" GA Hyperparameters")
 user_generations = st.sidebar.slider("Max Generations", min_value=10, max_value=300, value=100, step=10)
 user_pop_size = st.sidebar.slider("Population Size Pool", min_value=10, max_value=100, value=30, step=5)
 user_mutation_rate = st.sidebar.slider("Mutation Probability", min_value=0.01, max_value=0.50, value=0.15, step=0.01)
@@ -87,21 +87,21 @@ for dept in all_departments:
     dept_subs = dept_subjects.get(dept, [])
     dept_teachers = dept_profs.get(dept, [])
     
-    # 🚨 GUARDRAIL 1: Department must contain at least 1 teacher and 1 subject
+    #  GUARDRAIL 1: Department must contain at least 1 teacher and 1 subject
     if len(dept_subs) > 0 and len(dept_teachers) == 0:
         guardrail_failed = True
-        guardrail_error_msg = f"🚨 **Department Resource Deficiency:** Department **'{dept}'** has courses assigned to it but contains **0 faculty members**. Please add a teacher prefixed with `{dept}:` in the sidebar panel."
+        guardrail_error_msg = f" **Department Resource Deficiency:** Department **'{dept}'** has courses assigned to it but contains **0 faculty members**. Please add a teacher prefixed with `{dept}:` in the sidebar panel."
         break
     elif len(dept_teachers) > 0 and len(dept_subs) == 0:
         guardrail_failed = True
-        guardrail_error_msg = f"🚨 **Department Resource Deficiency:** Department **'{dept}'** has faculty registered but contains **0 allocated subjects**. Please add a subject prefixed with `{dept}:` in the sidebar panel."
+        guardrail_error_msg = f" **Department Resource Deficiency:** Department **'{dept}'** has faculty registered but contains **0 allocated subjects**. Please add a subject prefixed with `{dept}:` in the sidebar panel."
         break
 
-    # 🚨 GUARDRAIL 2: Workload distribution ceiling check per department silo
+    #  GUARDRAIL 2: Workload distribution ceiling check per department silo
     max_dept_capacity = len(dept_teachers) * 2
     if len(dept_subs) > max_dept_capacity:
         guardrail_failed = True
-        guardrail_error_msg = f"🚨 **Departmental Workload Overload:** Department **'{dept}'** requires scheduling **{len(dept_subs)} subjects**, but its pool of **{len(dept_teachers)} teachers** can only handle a max of **{max_dept_capacity} subjects** (Limit: 2 courses max per teacher)."
+        guardrail_error_msg = f" **Departmental Workload Overload:** Department **'{dept}'** requires scheduling **{len(dept_subs)} subjects**, but its pool of **{len(dept_teachers)} teachers** can only handle a max of **{max_dept_capacity} subjects** (Limit: 2 courses max per teacher)."
         break
 
     # Generate internal specializations bounded cleanly inside the matching department
@@ -195,12 +195,12 @@ with col_btn:
     force_run = st.button("🔄 Force Re-Optimize & Evolve", use_container_width=True)
 
 if not (batches and subjects_list and rooms and professors_list):
-    st.error("⚠️ System Incomplete: Please ensure all academic fields have entries in the configuration panel.")
+    st.error(" System Incomplete: Please ensure all academic fields have entries in the configuration panel.")
 
 elif guardrail_failed:
     # Stop compilation safely and prompt user with department error context
     st.error(guardrail_error_msg)
-    st.info("💡 **Resolution:** Adjust your inputs in the sidebar ensuring balanced allocation across all department groups.")
+    st.info(" **Resolution:** Adjust your inputs in the sidebar ensuring balanced allocation across all department groups.")
 
 else:
     with st.spinner("🧬 AI is sorting department boundaries and evolving optimal schedules..."):
@@ -232,9 +232,9 @@ else:
     final_clashes = int((1.0 / best_schedule.fitness) - 1) if best_schedule.fitness > 0 else 0
 
     if best_schedule.fitness == 1.0:
-        st.success(f"✨ Perfect Multi-Department Optimization Achieved! (Fitness: {best_schedule.fitness:.4f})")
+        st.success(f" Perfect Multi-Department Optimization Achieved! (Fitness: {best_schedule.fitness:.4f})")
     else:
-        st.warning(f"⚠️ Partial Convergence Reached (Fitness: {best_schedule.fitness:.4f}). {final_clashes} constraints mismatched. Try scaling up 'Max Generations'.")
+        st.warning(f" Partial Convergence Reached (Fitness: {best_schedule.fitness:.4f}). {final_clashes} constraints mismatched. Try scaling up 'Max Generations'.")
     
     # Render Output Layout Processing
     data_list = []
@@ -250,19 +250,19 @@ else:
         })
     df_all = pd.DataFrame(data_list)
 
-    st.markdown("### 📅 Generated Academic Schedules")
+    st.markdown("###  Generated Academic Schedules")
     for batch_name in batches:
         df_batch = df_all[df_all["Batch"] == batch_name]
         pivot_df = df_batch.pivot(index="Time Slot", columns="Day", values="DisplayCell")
         pivot_df = pivot_df.reindex(index=slots, columns=days).fillna("---")
         
-        st.subheader(f"📋 Section Matrix View: {batch_name}")
+        st.subheader(f" Section Matrix View: {batch_name}")
         st.dataframe(pivot_df, use_container_width=True)
 
     # --- DATA SHARING (DOWNLOAD CSV) ---
     st.write("") 
     st.download_button(
-        label="📥 Download Full Schedule Dataset (CSV)",
+        label=" Download Full Schedule Dataset (CSV)",
         data=df_all[["Batch", "Day", "Time Slot", "Subject", "Room", "Faculty"]].to_csv(index=False),
         file_name="department_timetable.csv",
         mime="text/csv",
@@ -271,8 +271,8 @@ else:
 
     # --- ADVANCED VIEW MORE SECTION (EXPANDER) ---
     st.write("")
-    with st.expander("🔍 View Advanced Evolution Analytics & Department Mapping"):
-        st.markdown("#### 📊 Execution Summary Logs")
+    with st.expander(" View Advanced Evolution Analytics & Department Mapping"):
+        st.markdown(" Execution Summary Logs")
         col1, col2, col3 = st.columns(3)
         with col1:
             st.metric(label="Calculation Runtime", value=f"{execution_time:.3f} seconds")
@@ -281,6 +281,6 @@ else:
         with col3:
             st.metric(label="Rule Violations & Room Clashes", value=str(final_clashes))
             
-        st.markdown("#### 🏢 Department Silo Faculty Registry")
+        st.markdown(" Department Silo Faculty Registry")
         st.write("Below is the internal mapping showing how the AI grouped professors exclusively with matching department courses:")
         st.json(faculty_specialization)
