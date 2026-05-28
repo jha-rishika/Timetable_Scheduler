@@ -9,42 +9,110 @@ import time
 st.set_page_config(page_title="AI Timetable Scheduler", page_icon="🧬", layout="wide")
 
 st.title("🧬 Campus AI Timetable Scheduler")
-st.caption("Automated Course Scheduling Engine powered by Genetic Optimization")
+st.caption("Department-Aware Automated Course Scheduling Engine powered by Constrained Genetic Optimization")
 st.write("") 
 
 # =========================================================================
-# 2. SIDEBAR - CONTROL PANEL & INPUT DATA
+# 2. SIDEBAR - CONFIGURATION PANEL & DEPARTMENT INPUT DATA
 # =========================================================================
 st.sidebar.header("⚙️ Configuration Panel")
 
-st.sidebar.subheader("🏫 Academic Inputs")
+st.sidebar.subheader("🏫 Academic Inputs (Department-Siloed)")
+st.sidebar.info("💡 **Format Tip:** Prefix subjects and professors with their Department code followed by a colon (e.g., `CSE: Subject` or `BasicSci: Name`).")
+
 default_batches = "BCS-2A, BCS-2B, BME-3A"
-default_subjects = "Data Structures, Computer Architecture, Discrete Math, Operating Systems, Java Programming"
-default_rooms = "Room 301, Room 302, Lab 1"
-default_professors = "Dr. P. Roy, Prof. S. Das, Dr. A. Sen, Prof. M. Mitra"
+default_subjects = "CSE: Data Structures, CSE: Java Lab, ECE: Computer Architecture, BasicSci: Discrete Math, CSE: Operating Systems"
+default_rooms = "Room 301, Room 302, Computing Lab 1, Electronics Lab"
+default_professors = "BasicSci: Dr. P. Roy, CSE: Prof. S. Das, ECE: Dr. A. Sen, CSE: Prof. M. Mitra"
 
 batches_input = st.sidebar.text_area("Batches / Sections (Comma separated)", default_batches)
-subjects_input = st.sidebar.text_area("Subjects / Courses (Comma separated)", default_subjects)
+subjects_input = st.sidebar.text_area("Subjects / Courses (With Dept Prefix)", default_subjects)
 rooms_input = st.sidebar.text_area("Available Classrooms (Comma separated)", default_rooms)
-professors_input = st.sidebar.text_area("Faculty Members (Comma separated)", default_professors)
+professors_input = st.sidebar.text_area("Faculty Members (With Dept Prefix)", default_professors)
 
-# Parsing text inputs into clean lists
+# Parsing text inputs into clean lists/dictionaries
 batches = [b.strip() for b in batches_input.split(",") if b.strip()]
-subjects = [s.strip() for s in subjects_input.split(",") if s.strip()]
 rooms = [r.strip() for r in rooms_input.split(",") if r.strip()]
-professors = [p.strip() for p in professors_input.split(",") if p.strip()]
+
+# Parse prefix formats: "Dept: Name" -> Extracting raw names and mappings
+subjects_list = []
+professors_list = []
+dept_subjects = {}  # { 'CSE': [subs] }
+dept_profs = {}     # { 'CSE': [profs] }
+
+for s in subjects_input.split(","):
+    if ":" in s:
+        dept, sub_name = s.split(":", 1)
+        dept, sub_name = dept.strip(), sub_name.strip()
+        subjects_list.append(sub_name)
+        dept_subjects.setdefault(dept, []).append(sub_name)
+    elif s.strip():
+        # Fallback if no prefix provided
+        subjects_list.append(s.strip())
+        dept_subjects.setdefault("General", []).append(s.strip())
+
+for p in professors_input.split(","):
+    if ":" in p:
+        dept, prof_name = p.split(":", 1)
+        dept, prof_name = dept.strip(), prof_name.strip()
+        professors_list.append(prof_name)
+        dept_profs.setdefault(dept, []).append(prof_name)
+    elif p.strip():
+        professors_list.append(p.strip())
+        dept_profs.setdefault("General", []).append(p.strip())
 
 st.sidebar.markdown("---")
 
-# Moving sliders to the bottom of the sidebar now that they trigger immediate auto-updates
+# Sliders for GA tweaks
 st.sidebar.subheader("🧬 GA Hyperparameters")
-user_generations = st.sidebar.slider("Max Generations", min_value=10, max_value=200, value=50, step=10)
-user_pop_size = st.sidebar.slider("Population Size Pool", min_value=10, max_value=100, value=20, step=5)
-user_mutation_rate = st.sidebar.slider("Mutation Probability", min_value=0.01, max_value=0.50, value=0.10, step=0.01)
+user_generations = st.sidebar.slider("Max Generations", min_value=10, max_value=300, value=100, step=10)
+user_pop_size = st.sidebar.slider("Population Size Pool", min_value=10, max_value=100, value=30, step=5)
+user_mutation_rate = st.sidebar.slider("Mutation Probability", min_value=0.01, max_value=0.50, value=0.15, step=0.01)
 
-# Standard structured institutional timeline parameters
 days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
 slots = ["09:30 AM", "11:00 AM", "01:30 PM", "03:00 PM"]
+
+# =========================================================================
+# DOMAIN CONSTRAINTS & DEPARTMENT-SILOED EXPERTISE GENERATOR
+# =========================================================================
+faculty_specialization = {}
+all_departments = set(dept_subjects.keys()).union(set(dept_profs.keys()))
+
+# Structural Validation Flag
+guardrail_failed = False
+guardrail_error_msg = ""
+
+# Loop through departments to verify rules and build cross-maps
+for dept in all_departments:
+    dept_subs = dept_subjects.get(dept, [])
+    dept_teachers = dept_profs.get(dept, [])
+    
+    # 🚨 GUARDRAIL 1: Department must contain at least 1 teacher and 1 subject
+    if len(dept_subs) > 0 and len(dept_teachers) == 0:
+        guardrail_failed = True
+        guardrail_error_msg = f"🚨 **Department Resource Deficiency:** Department **'{dept}'** has courses assigned to it but contains **0 faculty members**. Please add a teacher prefixed with `{dept}:` in the sidebar panel."
+        break
+    elif len(dept_teachers) > 0 and len(dept_subs) == 0:
+        guardrail_failed = True
+        guardrail_error_msg = f"🚨 **Department Resource Deficiency:** Department **'{dept}'** has faculty registered but contains **0 allocated subjects**. Please add a subject prefixed with `{dept}:` in the sidebar panel."
+        break
+
+    # 🚨 GUARDRAIL 2: Workload distribution ceiling check per department silo
+    max_dept_capacity = len(dept_teachers) * 2
+    if len(dept_subs) > max_dept_capacity:
+        guardrail_failed = True
+        guardrail_error_msg = f"🚨 **Departmental Workload Overload:** Department **'{dept}'** requires scheduling **{len(dept_subs)} subjects**, but its pool of **{len(dept_teachers)} teachers** can only handle a max of **{max_dept_capacity} subjects** (Limit: 2 courses max per teacher)."
+        break
+
+    # Generate internal specializations bounded cleanly inside the matching department
+    if dept_teachers and dept_subs:
+        random.seed(42)
+        shuffled_dept_subs = dept_subs.copy()
+        random.shuffle(shuffled_dept_subs)
+        
+        for idx, prof in enumerate(dept_teachers):
+            assigned = shuffled_dept_subs[idx*2 : (idx*2)+2]
+            faculty_specialization[prof] = assigned if assigned else [random.choice(dept_subs)]
 
 # =========================================================================
 # 3. GENETIC ALGORITHM MECHANICS
@@ -54,9 +122,9 @@ class LectureGene:
         self.batch = batch
         self.day = day
         self.slot = slot
-        self.subject = random.choice(subjects) if subjects else "TBD"
+        self.subject = random.choice(subjects_list) if subjects_list else "TBD"
         self.room = random.choice(rooms) if rooms else "TBD"
-        self.professor = random.choice(professors) if professors else "TBD"
+        self.professor = random.choice(professors_list) if professors_list else "TBD"
 
 class TimetableChromosome:
     def __init__(self):
@@ -69,16 +137,39 @@ class TimetableChromosome:
 
     def calculate_fitness(self):
         clashes = 0
+        prof_subject_tracking = {prof: set() for prof in professors_list}
+        
         for i in range(len(self.genes)):
-            for j in range(i + 1, len(self.genes)):
-                g1 = self.genes[i]
-                g2 = self.genes[j]
+            g1 = self.genes[i]
+            
+            # --- CONSTRAINT 1: Subject-to-Room Matching ---
+            is_lab_subject = "lab" in g1.subject.lower() or "programming" in g1.subject.lower()
+            is_lab_room = "lab" in g1.room.lower()
+            if is_lab_subject and not is_lab_room:
+                clashes += 1
+            elif not is_lab_subject and is_lab_room:
+                clashes += 1
                 
+            # --- CONSTRAINT 2: Department/Faculty Domain Alignment ---
+            allowed_subjects = faculty_specialization.get(g1.professor, [])
+            if g1.subject not in allowed_subjects:
+                clashes += 1  # Heavily penalizes if a teacher steps outside their department competency profile
+                
+            prof_subject_tracking[g1.professor].add(g1.subject)
+            
+            # Overlap coordinates detection
+            for j in range(i + 1, len(self.genes)):
+                g2 = self.genes[j]
                 if g1.day == g2.day and g1.slot == g2.slot:
                     if g1.room == g2.room:
                         clashes += 1
                     if g1.professor == g2.professor:
                         clashes += 1
+                        
+        # --- CONSTRAINT 3: Workload Caps ---
+        for prof, assigned_subs in prof_subject_tracking.items():
+            if len(assigned_subs) > 2:
+                clashes += (len(assigned_subs) - 2) * 2
                         
         self.fitness = 1.0 / (1.0 + clashes)
         return self.fitness
@@ -92,24 +183,27 @@ def crossover(parent1, parent2):
 def mutate(chromosome, mutation_rate):
     for gene in chromosome.genes:
         if random.random() < mutation_rate:
-            gene.subject = random.choice(subjects) if subjects else "TBD"
+            gene.subject = random.choice(subjects_list) if subjects_list else "TBD"
             gene.room = random.choice(rooms) if rooms else "TBD"
-            gene.professor = random.choice(professors) if professors else "TBD"
+            gene.professor = random.choice(professors_list) if professors_list else "TBD"
 
 # =========================================================================
-# 4. RUN OPTIMIZATION LOGIC (AUTOMATED & MAIN SCREEN ACTION BUTTON)
+# 4. RUN OPTIMIZATION CONTROL
 # =========================================================================
-
-# Clear main screen action anchor point so users instantly know what to click
 col_btn, _ = st.columns([1, 2])
 with col_btn:
     force_run = st.button("🔄 Force Re-Optimize & Evolve", use_container_width=True)
 
-if not (batches and subjects and rooms and professors):
-    st.error("⚠️ Please ensure all academic input fields have at least one entry in the sidebar.")
+if not (batches and subjects_list and rooms and professors_list):
+    st.error("⚠️ System Incomplete: Please ensure all academic fields have entries in the configuration panel.")
+
+elif guardrail_failed:
+    # Stop compilation safely and prompt user with department error context
+    st.error(guardrail_error_msg)
+    st.info("💡 **Resolution:** Adjust your inputs in the sidebar ensuring balanced allocation across all department groups.")
+
 else:
-    # Executes automatically on change OR when the big center button is tapped
-    with st.spinner("🧬 AI is dynamically evolving clash-free schedules..."):
+    with st.spinner("🧬 AI is sorting department boundaries and evolving optimal schedules..."):
         start_time = time.time()
         population = [TimetableChromosome() for _ in range(user_pop_size)]
         
@@ -137,10 +231,12 @@ else:
 
     final_clashes = int((1.0 / best_schedule.fitness) - 1) if best_schedule.fitness > 0 else 0
 
-    # Success feedback banner
-    st.success(f"✨ Live Dynamic Optimization Active! (Current Fitness Score: {best_schedule.fitness:.4f})")
+    if best_schedule.fitness == 1.0:
+        st.success(f"✨ Perfect Multi-Department Optimization Achieved! (Fitness: {best_schedule.fitness:.4f})")
+    else:
+        st.warning(f"⚠️ Partial Convergence Reached (Fitness: {best_schedule.fitness:.4f}). {final_clashes} constraints mismatched. Try scaling up 'Max Generations'.")
     
-    # Process dataset formatting
+    # Render Output Layout Processing
     data_list = []
     for g in best_schedule.genes:
         data_list.append({
@@ -154,7 +250,6 @@ else:
         })
     df_all = pd.DataFrame(data_list)
 
-    # Render out the distinct batch timetable structures
     st.markdown("### 📅 Generated Academic Schedules")
     for batch_name in batches:
         df_batch = df_all[df_all["Batch"] == batch_name]
@@ -169,14 +264,14 @@ else:
     st.download_button(
         label="📥 Download Full Schedule Dataset (CSV)",
         data=df_all[["Batch", "Day", "Time Slot", "Subject", "Room", "Faculty"]].to_csv(index=False),
-        file_name="ai_generated_timetable.csv",
+        file_name="department_timetable.csv",
         mime="text/csv",
         use_container_width=True
     )
 
     # --- ADVANCED VIEW MORE SECTION (EXPANDER) ---
     st.write("")
-    with st.expander("🔍 View Advanced Evolution Analytics"):
+    with st.expander("🔍 View Advanced Evolution Analytics & Department Mapping"):
         st.markdown("#### 📊 Execution Summary Logs")
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -184,6 +279,8 @@ else:
         with col2:
             st.metric(label="Active Search Space Depth", value=f"Gen {generation + 1}")
         with col3:
-            st.metric(label="Unresolved Structural Clashes", value=str(final_clashes))
-        
-        st.info("💡 Concept Note: The Core Fitness optimization score utilizes the objective penalty formulation f(x) = 1 / (1 + Clashes). Adjusting the slider settings in the sidebar changes the processing constraints dynamically.")
+            st.metric(label="Rule Violations & Room Clashes", value=str(final_clashes))
+            
+        st.markdown("#### 🏢 Department Silo Faculty Registry")
+        st.write("Below is the internal mapping showing how the AI grouped professors exclusively with matching department courses:")
+        st.json(faculty_specialization)
